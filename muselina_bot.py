@@ -288,20 +288,27 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(show_categories, pattern="^start_menu$")
+        ],
         states={
-            SELECTING_CATEGORY: [CallbackQueryHandler(select_category, pattern="^(absurd|identity|product|script|experiment|business)$")],
+            SELECTING_CATEGORY: [
+                CallbackQueryHandler(select_category, pattern="^(absurd|identity|product|script|experiment|business)$"),
+                CallbackQueryHandler(about, pattern="^about$")
+            ],
             GENERATING: [
                 CallbackQueryHandler(generate_prompt, pattern="^generate$"),
                 CallbackQueryHandler(show_categories, pattern="^start_menu$"),
+                CallbackQueryHandler(about, pattern="^about$")
             ],
         },
-        fallbacks=[CallbackQueryHandler(show_categories, pattern="^start_menu$")],
+        fallbacks=[
+            CallbackQueryHandler(show_categories, pattern="^start_menu$")
+        ],
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(show_categories, pattern="^start_menu$"))
-    app.add_handler(CallbackQueryHandler(about, pattern="^about$"))
 
     print("Muselina 2.0 запущена 🚀")
     app.run_polling()
