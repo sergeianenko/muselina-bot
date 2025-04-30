@@ -206,88 +206,107 @@ PROMPTS = {
 
 CATEGORY_LABELS = {
     "absurd": "🎭 Абсурд",
-    # Добавь сюда остальные метки
+    "identity": "🧬 Айдентика",
+    "product": "📱 Продукт",
+    "script": "🎬 Сценарий",
+    "experiment": "🧪 Эксперимент",
+    "business": "💼 Бизнес"
 }
 
-user_state = {}
+# Состояние пользователя
+user_category = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Я Muselina — генератор идей \u2728\n"
-        "Выбери категорию через меню Telegram, чтобы начать."
+        "\U0001F4AC Привет! Я Muselina — бот, который помогает генерировать креативные идеи в формате \"А что если...\"\n\n\U0001F4C1 Категории: /menu\nℹ️ О боте: /about\n\nНачни с выбора категории: /absurd /identity /product и т. д."
     )
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🧠 Muselina генерирует креативные фразы по категориям:\n" +
-        "\n".join(f"- {v}" for v in CATEGORY_LABELS.values())
+        "\U0001F9E0 Muselina создаёт креативные идеи по методу провокации: неожиданные вопросы запускают мышление в непривычном направлении.\n\n\u2728 Выберите категорию — и получите фразу. Нажмите \"Ещё\", чтобы продолжить."
     )
 
-async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    command = update.message.text[1:]
-    if command not in PROMPTS:
-        return
-
-    user_id = update.message.from_user.id
-    user_state[user_id] = {
-        "category": command,
-        "used": set()
-    }
-
-    await send_phrase(update, context, user_id, command)
-
-async def handle_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-
-    state = user_state.get(user_id)
-    if not state:
-        await query.answer("Сначала выбери категорию.")
-        return
-
-    await query.answer()
-    phrase = await get_unique_phrase(user_id, state["category"])
-    await query.message.reply_text(phrase)
-    await query.message.reply_text(
-        "🎲 Ещё?",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎲 Ещё", callback_data="generate")]
-        ])
-    )
-
-async def send_phrase(update, context, user_id, category):
-    phrase = await get_unique_phrase(user_id, category)
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    buttons = [
+        [InlineKeyboardButton(v, callback_data=k)] for k, v in CATEGORY_LABELS.items()
+    ]
+    buttons.append([InlineKeyboardButton("ℹ️ О боте", callback_data="about")])
+    buttons.append([InlineKeyboardButton("🎲 Случайная фраза", callback_data="random")])
     await update.message.reply_text(
-        f"{CATEGORY_LABELS[category]} — генерация фразы:\n\n{phrase}",
+        "\U0001F9E0 Muselina генерирует креативные фразы по категориям:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def category_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cat = update.message.text[1:]  # убираем слэш из /absurd и т.д.
+    if cat in PROMPTS:
+        user_category[update.message.from_user.id] = cat
+        phrase = random.choice(PROMPTS[cat])
+        await update.message.reply_text(
+            f"{CATEGORY_LABELS[cat]} — генерация фразы:\n\n{phrase}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎲 Ещё", callback_data="more")]
+            ])
+        )
+
+async def handle_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.callback_query.from_user.id
+    cat = user_category.get(user_id)
+    if not cat:
+        await update.callback_query.answer("Сначала выберите категорию через /menu")
+        return
+
+    phrase = random.choice(PROMPTS[cat])
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text(
+        phrase,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎲 Ещё", callback_data="generate")]
+            [InlineKeyboardButton("🎲 Ещё", callback_data="more")]
         ])
     )
 
-async def get_unique_phrase(user_id, category):
-    used = user_state[user_id]["used"]
-    pool = [p for p in PROMPTS[category] if p not in used]
+async def handle_menu_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = update.callback_query.data
+    user_id = update.callback_query.from_user.id
 
-    if not pool:
-        used.clear()
-        pool = PROMPTS[category]
+    if data == "about":
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(
+            "\U0001F9E0 Muselina создаёт креативные идеи по методу провокации. Выбирайте категорию и жмите \"Ещё\"!"
+        )
+        return
 
-    choice = random.choice(pool)
-    used.add(choice)
-    return choice
+    if data == "random":
+        cat = random.choice(list(PROMPTS.keys()))
+    else:
+        cat = data
+
+    user_category[user_id] = cat
+    phrase = random.choice(PROMPTS[cat])
+
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text(
+        f"{CATEGORY_LABELS[cat]} — генерация фразы:\n\n{phrase}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎲 Ещё", callback_data="more")]
+        ])
+    )
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("about", about))
+    app.add_handler(CommandHandler("menu", menu))
 
-    for cat in PROMPTS.keys():
-        app.add_handler(CommandHandler(cat, handle_category))
+    # Категории как команды
+    for cat in PROMPTS:
+        app.add_handler(CommandHandler(cat, category_command))
 
-    app.add_handler(CallbackQueryHandler(handle_generate, pattern="^generate$"))
+    app.add_handler(CallbackQueryHandler(handle_more, pattern="^more$"))
+    app.add_handler(CallbackQueryHandler(handle_menu_selection))
 
-    print("🤖 Muselina запущена")
+    print("Muselina запущена ✨")
     app.run_polling()
 
 if __name__ == "__main__":
