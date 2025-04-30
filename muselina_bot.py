@@ -2,12 +2,13 @@ import random
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    ContextTypes, ConversationHandler
+    ContextTypes
 )
 
+# Токен бота (НЕ публикуй его публично!)
 TOKEN = "8063982045:AAHEPu5eDOZqfE7Aj3kVbQsxOriSmtHVrDI"
 
-# Фразы по категориям
+# Категории и фразы
 PROMPTS = {
 "absurd": [
     "А что если твои мысли — это комары, и они жалят окружающих?",
@@ -204,113 +205,89 @@ PROMPTS = {
 }
 
 CATEGORY_LABELS = {
-    "absurd": "🎭 Абсурд — сюр, нелогичность, абстракция",
-    "identity": "🧬 Айдентика — стиль, личность, восприятие",
-    "product": "📱 Продукт — интерфейсы, UX, идеи",
-    "script": "🎬 Сценарий — сюжет, конфликт, история",
-    "experiment": "🧪 Эксперимент — гипотезы, нестандартные условия",
-    "business": "💼 Бизнес — брендинг, ценность, стратегия"
+    "absurd": "🎭 Абсурд",
+    # Добавь сюда остальные метки
 }
 
-# Состояния
-SELECTING_CATEGORY, GENERATING = range(2)
+user_state = {}
 
-# Память: текущая категория пользователя
-user_category = {}
-
-# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🎯 Начать", callback_data="start_menu")],
-        [InlineKeyboardButton("ℹ️ О боте", callback_data="about")]
-    ]
     await update.message.reply_text(
-        "Привет! Я Muselina — креативный бот-генератор идей ✨\n"
-        "Нажми «Начать», чтобы выбрать категорию, или «О боте», чтобы узнать подробнее.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Привет! Я Muselina — генератор идей \u2728\n"
+        "Выбери категорию через меню Telegram, чтобы начать."
     )
 
-# Описание бота
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(
-        "🧠 Muselina создаёт нестандартные фразы для творческих проектов.\n"
-        "Выбирай категорию — и получай «А что если...» для вдохновения.\n"
-        "\nПоддерживаемые категории:\n" +
-        "\n".join([f"- {v}" for v in CATEGORY_LABELS.values()]) +
-        "\n\nНажми «Назад», чтобы начать.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="start_menu")]])
+    await update.message.reply_text(
+        "🧠 Muselina генерирует креативные фразы по категориям:\n" +
+        "\n".join(f"- {v}" for v in CATEGORY_LABELS.values())
     )
 
-# Меню категорий
-async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    keyboard = [
-        [InlineKeyboardButton(v, callback_data=k)] for k, v in CATEGORY_LABELS.items()
-    ]
-    await update.callback_query.edit_message_text(
-        "Выбери категорию для генерации фраз:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return SELECTING_CATEGORY
+async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    command = update.message.text[1:]
+    if command not in PROMPTS:
+        return
 
-# Выбор категории
-async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_state[user_id] = {
+        "category": command,
+        "used": set()
+    }
+
+    await send_phrase(update, context, user_id, command)
+
+async def handle_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    cat = query.data
-    user_category[query.from_user.id] = cat
+    user_id = query.from_user.id
+
+    state = user_state.get(user_id)
+    if not state:
+        await query.answer("Сначала выбери категорию.")
+        return
 
     await query.answer()
-    await query.edit_message_text(
-        f"✅ Вы выбрали категорию: {CATEGORY_LABELS[cat].split('—')[0]}\n"
-        "Нажмите «Генерировать», чтобы получить идею.",
+    phrase = await get_unique_phrase(user_id, state["category"])
+    await query.message.reply_text(phrase)
+    await query.message.reply_text(
+        "🎲 Ещё?",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎲 Генерировать", callback_data="generate")],
-            [InlineKeyboardButton("🔙 Назад в меню", callback_data="start_menu")]
+            [InlineKeyboardButton("🎲 Ещё", callback_data="generate")]
         ])
     )
-    return GENERATING
 
-# Генерация
-async def generate_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.callback_query.from_user.id
-    category = user_category.get(user_id)
-    if not category:
-        await update.callback_query.answer("Сначала выбери категорию.")
-        return SELECTING_CATEGORY
+async def send_phrase(update, context, user_id, category):
+    phrase = await get_unique_phrase(user_id, category)
+    await update.message.reply_text(
+        f"{CATEGORY_LABELS[category]} — генерация фразы:\n\n{phrase}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎲 Ещё", callback_data="generate")]
+        ])
+    )
 
-    phrase = random.choice(PROMPTS[category])
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text(phrase)
-    return GENERATING
+async def get_unique_phrase(user_id, category):
+    used = user_state[user_id]["used"]
+    pool = [p for p in PROMPTS[category] if p not in used]
+
+    if not pool:
+        used.clear()
+        pool = PROMPTS[category]
+
+    choice = random.choice(pool)
+    used.add(choice)
+    return choice
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CallbackQueryHandler(show_categories, pattern="^start_menu$")
-        ],
-        states={
-            SELECTING_CATEGORY: [
-                CallbackQueryHandler(select_category, pattern="^(absurd|identity|product|script|experiment|business)$"),
-                CallbackQueryHandler(about, pattern="^about$")
-            ],
-            GENERATING: [
-                CallbackQueryHandler(generate_prompt, pattern="^generate$"),
-                CallbackQueryHandler(show_categories, pattern="^start_menu$"),
-                CallbackQueryHandler(about, pattern="^about$")
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(show_categories, pattern="^start_menu$")
-        ],
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("about", about))
 
-    app.add_handler(conv_handler)
+    for cat in PROMPTS.keys():
+        app.add_handler(CommandHandler(cat, handle_category))
 
-    print("Muselina 2.0 запущена 🚀")
+    app.add_handler(CallbackQueryHandler(handle_generate, pattern="^generate$"))
+
+    print("🤖 Muselina запущена")
     app.run_polling()
 
 if __name__ == "__main__":
